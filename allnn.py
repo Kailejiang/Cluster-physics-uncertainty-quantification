@@ -118,12 +118,12 @@ class EvidentialNN(nn.Module):
 
     def get_cached_nig_params(self):
         if self.nig_params_cache is None:
-            raise RuntimeError("请先调用forward方法生成NIG参数后，再获取缓存！")
+            raise RuntimeError("Needs to be forwarded")
         return self.nig_params_cache
 
     def get_cached_uncertainty(self):
         if self.uncertainty_cache is None:
-            raise RuntimeError("请先调用forward方法生成不确定性后，再获取缓存！")
+            raise RuntimeError("Needs to be forwarded")
         return self.uncertainty_cache
 
     def export_tsne_csv(self, save_path="tsne_results.csv"):
@@ -134,7 +134,6 @@ class EvidentialNN(nn.Module):
 
         print(f"t-SNE input dimension: {X.shape}")
 
-        # ================== t-SNE ==================
         tsne = TSNE(
             n_components=2,
             perplexity=30,
@@ -145,7 +144,6 @@ class EvidentialNN(nn.Module):
 
         X_embedded = tsne.fit_transform(X)
 
-        # ================== CSV ==================
         df = pd.DataFrame({
             "dim1": X_embedded[:, 0],
             "dim2": X_embedded[:, 1],
@@ -307,12 +305,12 @@ class MC_Dropout(nn.Module):
 
     def get_cached_mc_predictions(self):
         if self.mc_predictions_cache is None:
-            raise RuntimeError("请先调用forward方法完成蒙特卡洛采样后，再获取缓存！")
+            raise RuntimeError("Needs to be forwarded")
         return self.mc_predictions_cache
 
     def get_cached_uncertainty(self):
         if self.uncertainty_cache is None:
-            raise RuntimeError("请先调用forward方法完成蒙特卡洛采样后，再获取不确定性缓存！")
+            raise RuntimeError("Needs to be forwarded")
         return self.uncertainty_cache
 
 
@@ -482,17 +480,17 @@ class BayesianNN(nn.Module):
 
     def get_cached_kl_div(self) -> torch.Tensor:
         if self.kl_div_cache is None:
-            raise RuntimeError("请先调用forward方法后，再获取KL散度缓存！")
+            raise RuntimeError("Needs to be forwarded")
         return self.kl_div_cache
 
     def get_cached_mc_predictions(self) -> torch.Tensor:
         if self.mc_predictions_cache is None:
-            raise RuntimeError("请先调用forward方法并设置mc_samples>1后，再获取采样缓存！")
+            raise RuntimeError("Needs to be forwarded")
         return self.mc_predictions_cache
 
     def get_cached_uncertainty(self) -> Dict[str, torch.Tensor]:
         if self.uncertainty_cache is None:
-            raise RuntimeError("请先调用forward方法并设置mc_samples>1后，再获取不确定性缓存！")
+            raise RuntimeError("Needs to be forwarded")
         return self.uncertainty_cache
     
 
