@@ -189,8 +189,6 @@ class AtomisticTask_MC(pl.LightningModule):
             mc_uncertainty = self.model.output_modules.get_cached_uncertainty()
             for output in self.outputs:
                 mc_uncertainty_dict[output.name] = mc_uncertainty
-        except RuntimeError:
-            warnings.warn("蒙特卡洛采样未完成，跳过不确定性日志记录！")
 
         self.log("train_loss", loss, on_step=True, on_epoch=False, prog_bar=True)
         self.log_metrics(pred, targets, "train", mc_uncertainty_dict=mc_uncertainty_dict)
@@ -219,8 +217,6 @@ class AtomisticTask_MC(pl.LightningModule):
             mc_uncertainty = self.model.output_modules.get_cached_uncertainty()
             for output in self.outputs:
                 mc_uncertainty_dict[output.name] = mc_uncertainty
-        except RuntimeError:
-            warnings.warn("蒙特卡洛采样未完成，跳过不确定性日志记录！")
 
         self.log(
             "val_loss",
@@ -257,8 +253,6 @@ class AtomisticTask_MC(pl.LightningModule):
             mc_uncertainty = self.model.output_modules.get_cached_uncertainty()
             for output in self.outputs:
                 mc_uncertainty_dict[output.name] = mc_uncertainty
-        except RuntimeError:
-            warnings.warn("蒙特卡洛采样未完成，跳过不确定性日志记录！")
 
         self.log(
             "test_loss",
@@ -414,7 +408,6 @@ class AtomisticTask_BNN(pl.LightningModule):
 
         try:
             kl_div = self.model.output_modules.get_cached_kl_div()
-            # KL散度通常需要除以批量大小，保证训练稳定性
             batch_size = len(batch["_idx"]) if "_idx" in batch else 1
             elbo_kl_loss = self.bnn_beta * (kl_div / batch_size)
             loss += elbo_kl_loss
@@ -422,7 +415,6 @@ class AtomisticTask_BNN(pl.LightningModule):
 
             self.kl_loss_cache = elbo_kl_loss
         except RuntimeError:
-            warnings.warn("BNN KL散度缓存未生成，跳过KL正则项！")
             self.kl_loss_cache = torch.tensor(0.0, device=loss.device)
 
         return loss
@@ -458,8 +450,7 @@ class AtomisticTask_BNN(pl.LightningModule):
                 on_epoch=(subset != "train"),
                 prog_bar=True,
             )
-        except RuntimeError:
-            warnings.warn("BNN不确定性缓存未生成，跳过不确定性日志！")
+
 
     def apply_constraints(self, pred, targets):
         for output in self.outputs:
@@ -627,8 +618,6 @@ class ModelOutput_ENN(nn.Module):
         if not self.is_evidential:
             loss_input = pred[self.name]
         else:
-            if nig_params is None:
-                raise RuntimeError("对于证据输出，必须传入nig_params参数！")
             loss_input = nig_params
 
         loss = self.loss_weight * self.loss_fn(
@@ -754,8 +743,7 @@ class AtomisticTask_ENN(pl.LightningModule):
                     uncertainty = self.model.output_modules.get_cached_uncertainty()
                     nig_params_dict[output.name] = nig_params
                     uncertainty_dict[output.name] = uncertainty
-                except RuntimeError:
-                    warnings.warn(f"无法获取{output.name}对应的NIG参数缓存，请检查模型forward是否已调用！")
+
 
         loss = self.loss_fn(pred, targets, nig_params_dict=nig_params_dict)
 
@@ -788,8 +776,6 @@ class AtomisticTask_ENN(pl.LightningModule):
                     uncertainty = self.model.output_modules.get_cached_uncertainty()
                     nig_params_dict[output.name] = nig_params
                     uncertainty_dict[output.name] = uncertainty
-                except RuntimeError:
-                    warnings.warn(f"无法获取{output.name}对应的NIG参数缓存，请检查模型forward是否已调用！")
 
         loss = self.loss_fn(pred, targets, nig_params_dict=nig_params_dict)
 
@@ -830,8 +816,6 @@ class AtomisticTask_ENN(pl.LightningModule):
                     uncertainty = self.model.output_modules.get_cached_uncertainty()
                     nig_params_dict[output.name] = nig_params
                     uncertainty_dict[output.name] = uncertainty
-                except RuntimeError:
-                    warnings.warn(f"无法获取{output.name}对应的NIG参数缓存，请检查模型forward是否已调用！")
 
         loss = self.loss_fn(pred, targets, nig_params_dict=nig_params_dict)
 
@@ -849,7 +833,7 @@ class AtomisticTask_ENN(pl.LightningModule):
     def predict_without_postprocessing(self, batch):
         pp = self.model.do_postprocessing
         self.model.do_postprocessing = False
-        pred = self(batch)  # 调用forward后，模型已缓存NIG参数和不确定性
+        pred = self(batch) 
         self.model.do_postprocessing = pp
         return pred
 
@@ -906,7 +890,7 @@ class EvidentialLoss(nn.Module):
 
     def __init__(self, reg_coeff: float = 0.1):
         super().__init__()
-        self.reg_coeff = reg_coeff  # 正则项系数，可调
+        self.reg_coeff = reg_coeff  
 
     def forward(self, nig_params: torch.Tensor, target: torch.Tensor):
         mu, v, alpha, beta = torch.split(nig_params, 1, dim=-1)
