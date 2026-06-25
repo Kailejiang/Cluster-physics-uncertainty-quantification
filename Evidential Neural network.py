@@ -12,6 +12,8 @@ from sklearn.metrics import pairwise_distances
 from schnetpack.utils import load_model
 from ase import Atoms
 from schnetpack.data import ASEAtomsData
+import allnn
+import integration
 
 
 # =========================
@@ -93,7 +95,7 @@ schnet = spk.representation.SchNet(
     cutoff_fn=spk.nn.CosineCutoff(cutoff),
 )
 
-pred = spk.atomistic.EvidentialNN(
+pred = allnn.EvidentialNN(
     n_in=cfg["model"]["n_atom_basis"],
     output_key="energy_U0",
 )
@@ -108,9 +110,9 @@ model = spk.model.NeuralNetworkPotential(
     ],
 )
 
-loss_fn = spk.task.EvidentialLoss(reg_coeff=0.1)
+loss_fn = integration.EvidentialLoss(reg_coeff=0.1)
 
-output = spk.task.ModelOutput_ENN(
+output = integration.ModelOutput_ENN(
     name="energy_U0",
     loss_fn=loss_fn,
     loss_weight=1.0,
@@ -120,7 +122,7 @@ output = spk.task.ModelOutput_ENN(
     },
 )
 
-task = spk.task.AtomisticTask_ENN(
+task = integration.AtomisticTask_ENN(
     model=model,
     outputs=[output],
     optimizer_cls=torch.optim.AdamW,
