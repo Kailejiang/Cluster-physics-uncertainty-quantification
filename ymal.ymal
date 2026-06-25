@@ -1,0 +1,28 @@
+project:
+  base_dir: /virtual_project
+
+paths:
+  dataset_dir: /virtual_project/dataset/Ta2Nn
+  output_dir: /virtual_project/output
+  model_dir: /virtual_project/models
+
+data:
+  train_db: Ta2N3-.db
+  predict_db: Ta2N5-.db
+  split_train: dataset1_split.npz
+  split_predict: dataset2_split.npz
+  batch_size: 10
+
+model:
+  cutoff: 6.0
+  n_atom_basis: 16
+  n_rbf: 20
+  lr: 0.001
+  max_epochs: 100
+
+files:
+  main_csv: ta2n3-5.csv
+  tsne_csv: ta2n3-5_tsne.csv
+  structure_dir: ta2n3-5_structures
+  new_db: ta2n3-5.db
+  checkpoint: best_inference_model
