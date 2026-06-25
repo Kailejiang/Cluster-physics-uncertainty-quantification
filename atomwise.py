@@ -31,8 +31,8 @@ class EvidentialNN(nn.Module):
         if self.per_atom_output_key is not None:
             self.model_outputs.append(self.per_atom_output_key)
         self.n_out = n_out
-        self.nig_params_cache = None  # ### 新增：缓存NIG参数的变量 ###
-        self.uncertainty_cache = None  # ### 新增：缓存不确定性的变量 ###
+        self.nig_params_cache = None 
+        self.uncertainty_cache = None 
         self.tsne_features = []
         self.tsne_energies = []
         self.tsne_uncertainties = []
@@ -55,7 +55,6 @@ class EvidentialNN(nn.Module):
         self.aggregation_mode = aggregation_mode
 
     def forward(self, inputs: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        # 重置缓存
         self.nig_params_cache = None
         self.uncertainty_cache = None
 
@@ -76,92 +75,64 @@ class EvidentialNN(nn.Module):
             if self.aggregation_mode == "avg":
                 y = y / inputs[properties.n_atoms]
 
-        ### 新增：生成并缓存NIG参数（不写入最终inputs/pred） ###
         nig_params = self.nig_head(y)
-        self.nig_params_cache = nig_params  # 缓存NIG参数，供后续损失计算使用
+        self.nig_params_cache = nig_params 
 
-        ### 新增：计算并缓存不确定性（不写入最终inputs/pred） ###
         mu, v, alpha, beta = torch.split(nig_params, self.n_out, dim=-1)
-        # 约束参数范围
         v = F.softplus(v) + 1e-6
         alpha = F.softplus(alpha) + 1.0 + 1e-6
         beta = F.softplus(beta) + 1e-6
-        # 计算不确定性
         epistemic_uncertainty = beta / (alpha - 1) / v
         aleatoric_uncertainty = beta / (alpha - 1)
         total_uncertainty = epistemic_uncertainty + aleatoric_uncertainty
-        # 缓存不确定性
         self.uncertainty_cache = {
             "epistemic": epistemic_uncertainty,
             "aleatoric": aleatoric_uncertainty,
             "total": total_uncertainty
         }
 
-        ### 仅保留{output_key}在inputs中（最终pred仅含此项，不修改pred结构） ###
         mu, _, _, _ = torch.split(nig_params, self.n_out, dim=-1)
         inputs[self.output_key] = mu.squeeze(-1) if self.n_out == 1 else mu
 
         if not self.training:
             with torch.no_grad():
 
-                # 1️⃣ 原子特征
                 atom_feat = inputs["scalar_representation"]
-
-                # 2️⃣ 聚合为分子级特征
                 idx_m = inputs[properties.idx_m]
                 maxm = int(idx_m[-1]) + 1
-
                 mol_feat = snn.scatter_add(atom_feat, idx_m, dim_size=maxm)
-
                 if self.aggregation_mode == "avg":
                     mol_feat = mol_feat / inputs[properties.n_atoms]
-
-                # 3️⃣ energy（μ）
                 energy = inputs[self.output_key]
 
-                # 4️⃣ uncertainty（用 total）
                 if self.uncertainty_cache is not None:
                     uncertainty = self.uncertainty_cache["total"]
                 else:
                     uncertainty = torch.zeros_like(energy)
 
-                # 5️⃣ 强制转CPU（防炸）
                 self.tsne_features.append(mol_feat.detach().to("cpu"))
                 self.tsne_energies.append(energy.detach().to("cpu"))
                 self.tsne_uncertainties.append(uncertainty.detach().to("cpu"))
 
         return inputs
 
-    ### 新增：获取缓存的NIG参数（外部调用，不修改pred） ###
     def get_cached_nig_params(self):
         if self.nig_params_cache is None:
             raise RuntimeError("请先调用forward方法生成NIG参数后，再获取缓存！")
         return self.nig_params_cache
 
-    ### 新增：获取缓存的不确定性（外部调用，不修改pred） ###
     def get_cached_uncertainty(self):
         if self.uncertainty_cache is None:
             raise RuntimeError("请先调用forward方法生成不确定性后，再获取缓存！")
         return self.uncertainty_cache
 
     def export_tsne_csv(self, save_path="tsne_results.csv"):
-        """
-        对缓存的分子特征做t-SNE降维，并导出CSV
-        """
 
-        if len(self.tsne_features) == 0:
-            raise RuntimeError("没有收集到任何特征，请先运行eval forward！")
-
-        import torch
-        import pandas as pd
-        from sklearn.manifold import TSNE
-
-        # ✅ 强制统一CPU（避免你之前那个bug）
         X = torch.cat([t.cpu() for t in self.tsne_features], dim=0).numpy()
         y = torch.cat([t.cpu() for t in self.tsne_energies], dim=0).numpy()
         u = torch.cat([t.cpu() for t in self.tsne_uncertainties], dim=0).numpy()
 
-        print(f"t-SNE输入维度: {X.shape}")
+        print(f"t-SNE input dimension: {X.shape}")
 
         # ================== t-SNE ==================
         tsne = TSNE(
@@ -184,7 +155,7 @@ class EvidentialNN(nn.Module):
 
         df.to_csv(save_path, index=False)
 
-        print(f"t-SNE结果已保存到: {save_path}")
+        print(f"t-SNE saved: {save_path}")
 
     def reset_tsne_cache(self):
         self.tsne_features = []
@@ -211,9 +182,9 @@ class MC_Dropout(nn.Module):
         if self.per_atom_output_key is not None:
             self.model_outputs.append(self.per_atom_output_key)
         self.n_out = n_out
-        self.mc_samples = mc_samples  # 保存采样次数
-        self.mc_predictions_cache = None  # ### 新增：缓存蒙特卡洛采样结果 ###
-        self.uncertainty_cache = None  # ### 新增：缓存不确定性（均值+方差） ###
+        self.mc_samples = mc_samples  
+        self.mc_predictions_cache = None  
+        self.uncertainty_cache = None  
 
         self.tsne_features = []
         self.tsne_energies = []
@@ -254,51 +225,39 @@ class MC_Dropout(nn.Module):
 
         inputs[self.output_key] = y
 
-        ### 新增：MC-Dropout核心逻辑 - 蒙特卡洛采样（训练/验证/测试时启用dropout） ###
         if self.training or (not self.training and self.mc_samples > 1):
-            # 保存多次采样结果：形状 [mc_samples, batch_size, n_out]
             mc_predictions = []
-            # 开启dropout（评估模式下强制启用dropout层）
             self.outnet.train()
             for _ in range(self.mc_samples):
-                # 重复前向传播（原子级预测 + 聚合）
                 y_mc = self.outnet(inputs["scalar_representation"])
                 if self.aggregation_mode is not None:
                     y_mc = snn.scatter_add(y_mc, idx_m, dim_size=maxm)
                     y_mc = torch.squeeze(y_mc, -1)
                     if self.aggregation_mode == "avg":
                         y_mc = y_mc / inputs[properties.n_atoms]
-                mc_predictions.append(y_mc.unsqueeze(0))  # 增加采样维度
-            # 拼接采样结果并缓存
+                mc_predictions.append(y_mc.unsqueeze(0))
             mc_predictions = torch.cat(mc_predictions, dim=0)
             self.mc_predictions_cache = mc_predictions
 
-            ### 新增：计算不确定性（均值=点预测，方差=不确定性度量） ###
-            pred_mean = torch.mean(mc_predictions, dim=0)  # 采样均值（更稳健的点预测）
-            pred_var = torch.var(mc_predictions, dim=0)    # 采样方差（不确定性大小）
-            # 缓存不确定性（均值+方差）
+            pred_mean = torch.mean(mc_predictions, dim=0)  
+            pred_var = torch.var(mc_predictions, dim=0)    
             self.uncertainty_cache = {
-                "mean": pred_mean,    # 蒙特卡洛均值
-                "var": pred_var,      # 蒙特卡洛方差（不确定性）
-                "std": torch.sqrt(pred_var + 1e-6)  # 标准差（可选，更易解释）
+                "mean": pred_mean,   
+                "var": pred_var,     
+                "std": torch.sqrt(pred_var + 1e-6)  
             }
 
         if not self.training:
             with torch.no_grad():
 
-                # 1️⃣ 原子特征
                 atom_feat = inputs["scalar_representation"]
-
-                # 2️⃣ 聚合为分子级特征
                 idx_m = inputs[properties.idx_m]
                 maxm = int(idx_m[-1]) + 1
-
                 mol_feat = snn.scatter_add(atom_feat, idx_m, dim_size=maxm)
 
                 if self.aggregation_mode == "avg":
                     mol_feat = mol_feat / inputs[properties.n_atoms]
 
-                # 3️⃣ energy（用MC均值更合理）
                 if self.uncertainty_cache is not None:
                     energy = self.uncertainty_cache["mean"]
                     uncertainty = self.uncertainty_cache["std"]
@@ -306,7 +265,6 @@ class MC_Dropout(nn.Module):
                     energy = inputs[self.output_key]
                     uncertainty = torch.zeros_like(energy)
 
-                # 4️⃣ 强制转CPU（避免你之前那个报错）
                 self.tsne_features.append(mol_feat.detach().to("cpu"))
                 self.tsne_energies.append(energy.detach().to("cpu"))
                 self.tsne_uncertainties.append(uncertainty.detach().to("cpu"))
@@ -314,19 +272,12 @@ class MC_Dropout(nn.Module):
         return inputs
 
     def export_tsne_csv(self, save_path="tsne_results.csv"):
-        if len(self.tsne_features) == 0:
-            raise RuntimeError("没有收集到任何特征，请先运行eval forward！")
 
-        import torch
-        import pandas as pd
-        from sklearn.manifold import TSNE
-
-        # ✅ 强制统一CPU（彻底避免device bug）
         X = torch.cat([t.cpu() for t in self.tsne_features], dim=0).numpy()
         y = torch.cat([t.cpu() for t in self.tsne_energies], dim=0).numpy()
         u = torch.cat([t.cpu() for t in self.tsne_uncertainties], dim=0).numpy()
 
-        print(f"t-SNE输入维度: {X.shape}")
+        print(f"t-SNE input dimension: {X.shape}")
 
         tsne = TSNE(
             n_components=2,
@@ -347,7 +298,7 @@ class MC_Dropout(nn.Module):
 
         df.to_csv(save_path, index=False)
 
-        print(f"t-SNE结果已保存到: {save_path}")
+        print(f"t-SNE saved: {save_path}")
 
     def reset_tsne_cache(self):
         self.tsne_features = []
@@ -359,7 +310,6 @@ class MC_Dropout(nn.Module):
             raise RuntimeError("请先调用forward方法完成蒙特卡洛采样后，再获取缓存！")
         return self.mc_predictions_cache
 
-    ### 新增：获取不确定性缓存 ###
     def get_cached_uncertainty(self):
         if self.uncertainty_cache is None:
             raise RuntimeError("请先调用forward方法完成蒙特卡洛采样后，再获取不确定性缓存！")
@@ -367,9 +317,7 @@ class MC_Dropout(nn.Module):
 
 
 class BayesianNN(nn.Module):
-    """
-    贝叶斯版本的Atomwise模型，预测原子级贡献并聚合为全局预测，支持不确定性量化
-    """
+
     def __init__(
         self,
         n_in: int,
@@ -382,7 +330,7 @@ class BayesianNN(nn.Module):
         per_atom_output_key: Optional[str] = None,
         prior_mu: float = 0.0,
         prior_sigma: float = 1.0,
-        mc_samples: int = 50,  # 蒙特卡洛采样次数（用于不确定性量化）
+        mc_samples: int = 50, 
     ):
         super().__init__()
         self.output_key = output_key
@@ -394,9 +342,9 @@ class BayesianNN(nn.Module):
         self.prior_mu = prior_mu
         self.prior_sigma = prior_sigma
         self.mc_samples = mc_samples
-        self.kl_div_cache = None  # 缓存KL散度（贝叶斯正则项）
-        self.mc_predictions_cache = None  # 缓存蒙特卡洛采样结果
-        self.uncertainty_cache = None  # 缓存不确定性（均值+方差）
+        self.kl_div_cache = None 
+        self.mc_predictions_cache = None  
+        self.uncertainty_cache = None  
         self.tsne_features = []
         self.tsne_energies = []
         self.tsne_uncertainties = []
@@ -418,7 +366,6 @@ class BayesianNN(nn.Module):
 
 
     def _compute_total_kl_div(self) -> torch.Tensor:
-        """计算模型所有BayesianDense层的KL散度之和"""
         total_kl = 0.0
         for module in self.outnet.modules():
             if isinstance(module, snn.BayesianDense):
@@ -426,22 +373,17 @@ class BayesianNN(nn.Module):
         return total_kl
 
     def forward(self, inputs: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        # 重置缓存
         self.kl_div_cache = None
         self.mc_predictions_cache = None
         self.uncertainty_cache = None
 
-        # 计算并缓存KL散度（贝叶斯模型的正则项，训练时需要）
         self.kl_div_cache = self._compute_total_kl_div()
 
-        # 普通前向传播：单次采样的原子级预测
         y = self.outnet(inputs["scalar_representation"])
 
-        # 保存原子级预测结果（若需要）
         if self.per_atom_output_key is not None:
             inputs[self.per_atom_output_key] = y
 
-        # 聚合为全局预测
         if self.aggregation_mode is not None:
             idx_m = inputs[properties.idx_m]
             maxm = int(idx_m[-1]) + 1
@@ -451,42 +393,37 @@ class BayesianNN(nn.Module):
             if self.aggregation_mode == "avg":
                 y = y / inputs[properties.n_atoms]
 
-        # 保存单次采样的全局预测结果
         inputs[self.output_key] = y
 
-        ### 贝叶斯核心：蒙特卡洛采样量化不确定性（训练/评估模式均启用） ###
         if self.mc_samples > 1:
             mc_predictions = []
-            # 多次采样获取预测分布
             for _ in range(self.mc_samples):
-                # 原子级预测（重新采样权重）
                 y_mc = self.outnet(inputs["scalar_representation"])
-                # 聚合为全局预测
+
                 if self.aggregation_mode is not None:
                     y_mc = snn.scatter_add(y_mc, idx_m, dim_size=maxm)
                     y_mc = torch.squeeze(y_mc, -1)
                     if self.aggregation_mode == "avg":
                         y_mc = y_mc / inputs[properties.n_atoms]
                 mc_predictions.append(y_mc.unsqueeze(0))
-            # 拼接采样结果并缓存
+
             mc_predictions = torch.cat(mc_predictions, dim=0)
             self.mc_predictions_cache = mc_predictions
 
-            # 计算不确定性（均值=稳健点预测，方差=认知不确定性）
+
             pred_mean = torch.mean(mc_predictions, dim=0)
             pred_var = torch.var(mc_predictions, dim=0)
             self.uncertainty_cache = {
                 "mean": pred_mean,
                 "var": pred_var,
-                "std": torch.sqrt(pred_var + 1e-6)  # 标准差，避免根号内为负
+                "std": torch.sqrt(pred_var + 1e-6) 
             }
 
         if not self.training:
             with torch.no_grad():
-                # 1️⃣ 获取原子特征
+
                 atom_feat = inputs["scalar_representation"]
 
-                # 2️⃣ 聚合为分子级特征
                 idx_m = inputs[properties.idx_m]
                 maxm = int(idx_m[-1]) + 1
 
@@ -495,7 +432,6 @@ class BayesianNN(nn.Module):
                 if self.aggregation_mode == "avg":
                     mol_feat = mol_feat / inputs[properties.n_atoms]
 
-                # 3️⃣ 获取预测值 & 不确定性
                 energy = inputs[self.output_key]
 
                 if self.uncertainty_cache is not None:
@@ -503,7 +439,6 @@ class BayesianNN(nn.Module):
                 else:
                     uncertainty = torch.zeros_like(energy)
 
-                # 4️⃣ 存入缓存（转cpu防止显存爆）
                 self.tsne_features.append(mol_feat.detach().cpu())
                 self.tsne_energies.append(energy.detach().cpu())
                 self.tsne_uncertainties.append(uncertainty.detach().cpu())
@@ -511,20 +446,14 @@ class BayesianNN(nn.Module):
         return inputs
 
     def export_tsne_csv(self, save_path="tsne_results.csv"):
-        """
-        对缓存的分子特征做t-SNE降维，并导出CSV
-        """
-        if len(self.tsne_features) == 0:
-            raise RuntimeError("没有收集到任何特征，请先运行eval forward！")
 
-        # 拼接所有batch
+
         X = torch.cat([t.cpu() for t in self.tsne_features], dim=0).numpy()
         y = torch.cat([t.cpu() for t in self.tsne_energies], dim=0).numpy()
         u = torch.cat([t.cpu() for t in self.tsne_uncertainties], dim=0).numpy()
 
-        print(f"t-SNE输入维度: {X.shape}")
+        print(f"t-SNE input dimension: {X.shape}")
 
-        # ================== t-SNE降维 ==================
         tsne = TSNE(
             n_components=2,
             perplexity=30,
@@ -535,7 +464,6 @@ class BayesianNN(nn.Module):
 
         X_embedded = tsne.fit_transform(X)
 
-        # ================== 保存CSV ==================
         df = pd.DataFrame({
             "dim1": X_embedded[:, 0],
             "dim2": X_embedded[:, 1],
@@ -545,26 +473,23 @@ class BayesianNN(nn.Module):
 
         df.to_csv(save_path, index=False)
 
-        print(f"t-SNE结果已保存到: {save_path}")
+        print(f"t-SNE saved: {save_path}")
 
     def reset_tsne_cache(self):
         self.tsne_features = []
         self.tsne_energies = []
         self.tsne_uncertainties = []
 
-    ### 新增：获取缓存的KL散度（用于ELBO损失计算） ###
     def get_cached_kl_div(self) -> torch.Tensor:
         if self.kl_div_cache is None:
             raise RuntimeError("请先调用forward方法后，再获取KL散度缓存！")
         return self.kl_div_cache
 
-    ### 新增：获取蒙特卡洛采样结果缓存 ###
     def get_cached_mc_predictions(self) -> torch.Tensor:
         if self.mc_predictions_cache is None:
             raise RuntimeError("请先调用forward方法并设置mc_samples>1后，再获取采样缓存！")
         return self.mc_predictions_cache
 
-    ### 新增：获取不确定性缓存 ###
     def get_cached_uncertainty(self) -> Dict[str, torch.Tensor]:
         if self.uncertainty_cache is None:
             raise RuntimeError("请先调用forward方法并设置mc_samples>1后，再获取不确定性缓存！")
