@@ -13,6 +13,8 @@ from schnetpack.utils import load_model
 from schnetpack import interfaces
 from ase import Atoms
 from schnetpack.data import ASEAtomsData
+import allnn
+import integration
 
 
 # =========================
@@ -96,7 +98,7 @@ schnet = spk.representation.SchNet(
     cutoff_fn=spk.nn.CosineCutoff(cutoff),
 )
 
-output_module = spk.atomistic.MC_Dropout(
+output_module = allnn.MC_Dropout(
     n_in=cfg["model"]["n_atom_basis"],
     output_key="energy_U0",
 )
@@ -111,7 +113,7 @@ nnpot = spk.model.NeuralNetworkPotential(
     ],
 )
 
-output = spk.task.ModelOutput_MC(
+output = integration.ModelOutput_MC(
     name="energy_U0",
     loss_fn=torch.nn.MSELoss(),
     loss_weight=1.0,
@@ -121,7 +123,7 @@ output = spk.task.ModelOutput_MC(
     },
 )
 
-task = spk.task.AtomisticTask_MC(
+task = integration.AtomisticTask_MC(
     model=nnpot,
     outputs=[output],
     optimizer_cls=torch.optim.AdamW,
