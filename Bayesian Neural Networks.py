@@ -13,6 +13,8 @@ from schnetpack.utils import load_model
 from schnetpack import interfaces
 from ase import Atoms
 from schnetpack.data import ASEAtomsData
+import allnn
+import integration
 
 
 # =========================
@@ -99,7 +101,7 @@ schnet = spk.representation.SchNet(
     cutoff_fn=spk.nn.CosineCutoff(cutoff),
 )
 
-pred = spk.atomistic.BayesianNN(
+pred = allnn.BayesianNN(
     n_in=cfg["model"]["n_atom_basis"],
     output_key="energy_U0",
 )
@@ -115,7 +117,7 @@ model = spk.model.NeuralNetworkPotential(
 )
 
 
-output = spk.task.ModelOutput_BNN(
+output = integration.ModelOutput_BNN(
     name="energy_U0",
     loss_fn=torch.nn.MSELoss(),
     loss_weight=1.0,
@@ -126,7 +128,7 @@ output = spk.task.ModelOutput_BNN(
 )
 
 
-task = spk.task.AtomisticTask_BNN(
+task = integration.AtomisticTask_BNN(
     model=model,
     outputs=[output],
     optimizer_cls=torch.optim.AdamW,
