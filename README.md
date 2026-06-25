@@ -25,6 +25,5 @@ torch = 2.2.2 (Machine learning method implementation)
 
 pytorch_lightning = 2.2.1 (Machine learning architecture implementation)
 
-scikit-learn = 1.5.2 (Clustering method implementation)
+scikit-learn = 1.5.2 (Dimensionality reduction method implementation)
 
-umap-learning = 0.5.7 (Dimensionality reduction method implementation)
